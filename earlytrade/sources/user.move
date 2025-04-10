@@ -60,30 +60,13 @@ public fun create_option_as_buyer<CoinType>(
     user_orders: &mut UserOrders,
     orderbook: &mut OrderBook,
     market: &mut Market<CoinType>,
-    
     strike_price: u64, // the strike price of the option
     amount: u64, // amount of the underlying assets
-
-
     premium_coin: Coin<CoinType>,
     ctx: &mut TxContext
 ) {
 
-    let option = covered_put_option::new_option(
-        strike_price,
-        amount,
-        fee_paid_by_buyer,
-        fee_paid_by_writer,
-        covered_put_option::status_pending_buyer(),
-    );
-
-
-    vector::push_back(&mut user_orders.pending_orders, option_id);
 }
-
-
-
-
 
 /// Create a covered put option as a writer
 public fun create_option_as_writer<CoinType>(
@@ -96,17 +79,6 @@ public fun create_option_as_writer<CoinType>(
     collateral_coin: Coin<CoinType>,
     ctx: &mut TxContext
 ) {
-    let option_id = earlytrade::create_option_as_writer(
-        orderbook,
-        market,
-        strike_price,
-        premium,
-        expiration_date,
-        collateral_coin,
-        ctx
-    );
-    
-    vector::push_back(&mut user_orders.pending_orders, option_id);
 }
 
 /// Fill a covered put option as a buyer
@@ -118,19 +90,6 @@ public fun fill_option_as_buyer<CoinType>(
     premium_coin: Coin<CoinType>,
     ctx: &mut TxContext
 ) {
-    assert!(option.status == covered_put_option::status_pending_buyer(), EInvalidStatus);
-    assert!(option.writer.is_some(), ENotAuthorized);
-    
-    let option_id = covered_put_option::get_id(option);
-    
-    // Remove from pending orders
-    let index = vector::index_of(&user_orders.pending_orders, &option_id);
-    if (index != -1) {
-        vector::remove(&mut user_orders.pending_orders, (index as u64));
-    };
-    
-    // Add to active orders
-    vector::push_back(&mut user_orders.active_orders, option_id);
 }
 
 /// Fill a covered put option as a writer
@@ -192,28 +151,7 @@ public fun cancel_option<CoinType>(
     option: &mut CoveredPutOption<CoinType>,
     ctx: &mut TxContext
 ) {
-    assert!(
-        option.status == covered_put_option::status_pending_buyer() ||
-        option.status == covered_put_option::status_pending_writer(),
-        EInvalidStatus
-    );
     
-    let sender = tx_context::sender(ctx);
-    if (option.buyer.is_some()) {
-        let buyer = option::borrow(&option.buyer);
-        assert!(*buyer == sender, ENotAuthorized);
-    } else if (option.writer.is_some()) {
-        let writer = option::borrow(&option.writer);
-        assert!(*writer == sender, ENotAuthorized);
-    };
-    
-    let option_id = covered_put_option::get_id(option);
-    
-    // Remove from pending orders
-    let index = vector::index_of(&user_orders.pending_orders, &option_id);
-    if (index != -1) {
-        vector::remove(&mut user_orders.pending_orders, (index as u64));
-    };
 }
 
 /// Reclaim collateral and premium from expired covered put option
@@ -223,27 +161,6 @@ public fun reclaim_from_expired<CoinType>(
     option: &mut CoveredPutOption<CoinType>,
     ctx: &mut TxContext
 ) {
-    assert!(option.status == covered_put_option::status_expired(), EInvalidStatus);
-    
-    let sender = tx_context::sender(ctx);
-    if (option.buyer.is_some()) {
-        let buyer = option::borrow(&option.buyer);
-        assert!(*buyer == sender, ENotAuthorized);
-    } else if (option.writer.is_some()) {
-        let writer = option::borrow(&option.writer);
-        assert!(*writer == sender, ENotAuthorized);
-    };
-    
-    let option_id = covered_put_option::get_id(option);
-    
-    // Remove from active orders
-    let index = vector::index_of(&user_orders.active_orders, &option_id);
-    if (index != -1) {
-        vector::remove(&mut user_orders.active_orders, (index as u64));
-    };
-    
-    // Add to expired orders
-    vector::push_back(&mut user_orders.expired_orders, option_id);
 }
 
 /// List a covered put option for secondary market sale
@@ -255,27 +172,6 @@ public fun list_for_secondary_market<CoinType>(
     asking_price: u64,
     ctx: &mut TxContext
 ) {
-    assert!(option.status == covered_put_option::status_active(), EInvalidStatus);
-    
-    let sender = tx_context::sender(ctx);
-    if (option.buyer.is_some()) {
-        let buyer = option::borrow(&option.buyer);
-        assert!(*buyer == sender, ENotAuthorized);
-    } else if (option.writer.is_some()) {
-        let writer = option::borrow(&option.writer);
-        assert!(*writer == sender, ENotAuthorized);
-    };
-    
-    let option_id = covered_put_option::get_id(option);
-    
-    // Remove from active orders
-    let index = vector::index_of(&user_orders.active_orders, &option_id);
-    if (index != -1) {
-        vector::remove(&mut user_orders.active_orders, (index as u64));
-    };
-    
-    // Add to secondary market orders
-    vector::push_back(&mut user_orders.secondary_market_orders, option_id);
 }
 
 /// Cancel a covered put option from secondary market
@@ -286,27 +182,7 @@ public fun cancel_from_secondary_market<CoinType>(
     option: &mut CoveredPutOption<CoinType>,
     ctx: &mut TxContext
 ) {
-    assert!(option.status == covered_put_option::status_for_sale(), EInvalidStatus);
-    
-    let sender = tx_context::sender(ctx);
-    if (option.buyer.is_some()) {
-        let buyer = option::borrow(&option.buyer);
-        assert!(*buyer == sender, ENotAuthorized);
-    } else if (option.writer.is_some()) {
-        let writer = option::borrow(&option.writer);
-        assert!(*writer == sender, ENotAuthorized);
-    };
-    
-    let option_id = covered_put_option::get_id(option);
-    
-    // Remove from secondary market orders
-    let index = vector::index_of(&user_orders.secondary_market_orders, &option_id);
-    if (index != -1) {
-        vector::remove(&mut user_orders.secondary_market_orders, (index as u64));
-    };
-    
-    // Add back to active orders
-    vector::push_back(&mut user_orders.active_orders, option_id);
+
 }
 
 /// Buy a covered put option from secondary market
@@ -318,15 +194,5 @@ public fun buy_from_secondary_market<CoinType>(
     payment_coin: Coin<CoinType>,
     ctx: &mut TxContext
 ) {
-    assert!(option.status == covered_put_option::status_for_sale(), EInvalidStatus);
-    assert!(option.listed_price.is_some(), EInvalidTradePrice);
     
-    let listed_price = option::borrow(&option.listed_price);
-    let payment_amount = coin::value(&payment_coin);
-    assert!(payment_amount == *listed_price, EInvalidTradePrice);
-    
-    let option_id = covered_put_option::get_id(option);
-    
-    // Add to active orders
-    vector::push_back(&mut user_orders.active_orders, option_id);
 }
