@@ -15,7 +15,7 @@ const STATUS_PENDING_WRITER: u8 = 1;       // Created by buyer, waiting for writ
 const STATUS_ACTIVE: u8 = 2;               // Matched and active
 const STATUS_EXERCISED: u8 = 3;            // Exercised by buyer(only allow fully exercised)
 const STATUS_EXPIRED: u8 = 4;              // Expired without exercise
-const STATUS_FOR_SALE: u8 = 5;             // Option is listed for sale on secondary market
+
 
 
 // ====== Error Codes ======

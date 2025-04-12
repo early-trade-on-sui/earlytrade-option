@@ -108,7 +108,7 @@ public struct Market<phantom TradingCoinType> has key {
     total_premium_volume: u64,              // Total premium volume traded
     total_collateral_volume: u64,           // Total collateral volume locked
     active_options_count: u64,              // Number of active options
-    secondary_market_volume: u64,           // Volume of secondary market trades
+
 }
 
 
@@ -124,8 +124,6 @@ public struct OrderBook has key {
     pending_writer_orders: Table<ID,ID>,  
     pending_buyer_orders: Table<ID,ID>,   
     
-    // Secondary market listings
-    secondary_market_listings: Table<ID,ID>, 
     
     // Status tracking
     active_options: Table<ID, ID>,                // Active options
@@ -179,7 +177,7 @@ public fun init_orderbook(
 
         pending_writer_orders: table::new<ID,ID>(ctx),
         pending_buyer_orders: table::new<ID,ID>(ctx),
-        secondary_market_listings: table::new<ID,ID>(ctx),
+
         active_options: table::new<ID,ID>(ctx),
         exercised_options: table::new<ID,ID>(ctx),
         expired_options: table::new<ID,ID>(ctx),
@@ -231,7 +229,7 @@ public fun create_market<TradingCoinType>(
         total_premium_volume: 0u64,
         total_collateral_volume: 0u64,
         active_options_count: 0u64,
-        secondary_market_volume: 0u64,
+
     };
     
     // add market to orderbook
@@ -359,13 +357,7 @@ public fun push_covered_put_option_id_into_pending_buyer(
     table::add(&mut orderbook.pending_buyer_orders, covered_put_option_id, covered_put_option_id);
 }
 
-// push covered-put option id into orderbook's secondary market listings
-public fun push_covered_put_option_id_into_secondary_market(
-    orderbook: &mut OrderBook,
-    covered_put_option_id: ID,
-) {
-    table::add(&mut orderbook.secondary_market_listings, covered_put_option_id, covered_put_option_id);
-}
+
 
 // push covered-put option id into orderbook's active options
 public fun push_covered_put_option_id_into_active(
@@ -407,13 +399,6 @@ public fun pop_covered_put_option_id_from_pending_buyer(
     table::remove(&mut orderbook.pending_buyer_orders, covered_put_option_id);
 }
 
-// pop up covered-put option id from orderbook's secondary market listings  
-public fun pop_covered_put_option_id_from_secondary_market(
-    orderbook: &mut OrderBook,
-    covered_put_option_id: ID,
-) {
-    table::remove(&mut orderbook.secondary_market_listings, covered_put_option_id);
-}
 
 // pop up covered-put option id from orderbook's active options 
 public fun pop_covered_put_option_id_from_active(
