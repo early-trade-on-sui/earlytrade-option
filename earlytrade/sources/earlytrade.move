@@ -50,28 +50,18 @@ use sui::event;
 
 use std::string::{Self, String};
 use sui::clock::Clock;
-use std::type_name::{Self, TypeName};
+use std::type_name;
 
-// Import the option module
-use earlytrade::covered_put_option::{Self, CoveredPutOption};
 
 // ====== Constants ======
 
 
 // Error codes
-const ENotAuthorized: u64 = 0;
-const EInvalidAmount: u64 = 1;
-const EInvalidStatus: u64 = 2;
-const EAlreadyMatched: u64 = 3;
-const EOptionExpired: u64 = 4;
-const ETGENotSet: u64 = 5;
-const EInvalidPrice: u64 = 6;
+
 const EInvalidDate: u64 = 7;
-const ENotExercisable: u64 = 8;
-const EExercisePeriodEnded: u64 = 9;
+
 const EUnderlyingAssetNotSet: u64 = 10;
-const ENotTransferable: u64 = 11;
-const EInvalidTradePrice: u64 = 12;
+
 const EUnderlyingAssetNotAligned: u64 = 13;
 
 // ====== Core Data Structures ======
@@ -121,8 +111,8 @@ public struct OrderBook has key {
     market_id: vector<ID>,                  // Reference to markets(Buck, USDC, SUI and etc.)
     
     // Primary market orders
-    pending_writer_orders: Table<ID,ID>,  
-    pending_buyer_orders: Table<ID,ID>,   
+    waiting_writer_orders: Table<ID,ID>,  
+    waiting_buyer_orders: Table<ID,ID>,   
     
     
     // Status tracking
@@ -131,7 +121,6 @@ public struct OrderBook has key {
     expired_options: Table<ID, ID>,               // Expired options
     
     // Statistics
-    last_matched_timestamp: u64,            // When last order was matched
     created_at: u64,                        // When orderbook was created
 }
 
@@ -175,14 +164,13 @@ public fun init_orderbook(
         name: orderbook_name,
         market_id: vector::empty(),
 
-        pending_writer_orders: table::new<ID,ID>(ctx),
-        pending_buyer_orders: table::new<ID,ID>(ctx),
+        waiting_writer_orders: table::new<ID,ID>(ctx),
+        waiting_buyer_orders: table::new<ID,ID>(ctx),
 
         active_options: table::new<ID,ID>(ctx),
         exercised_options: table::new<ID,ID>(ctx),
         expired_options: table::new<ID,ID>(ctx),
         
-        last_matched_timestamp: 0,
         created_at: current_time,
     };
 
@@ -270,22 +258,6 @@ public fun set_exericse_expiration_date<CoinType>(
     market.expiration_date = option::some(expiration_date);
 }
 
-/// Set underlying asset address after TGE (admin only)
-public fun set_underlying_asset<CoinType>(
-    market: &mut Market<CoinType>,
-    _: &AdminCap,
-    underlying_asset_type: String,
-    decimal: u8,
-) {
-    // Ensure TGE date has been set
-    assert!(option::is_some(&market.exericse_date), ETGENotSet);
-    
-    // Set underlying asset and enable exercising
-    market.underlying_asset_type = option::some(underlying_asset_type);
-    market.decimal = decimal;
-}
-
-
 /// Withdraw accumulated fees (admin only)
 public fun withdraw_fees<CoinType>(
     market: &mut Market<CoinType>,
@@ -302,7 +274,6 @@ public fun withdraw_fees<CoinType>(
 public fun set_underlying_asset_type_and_decimal<UnderlyingAssetType, TradingCoinType>(
     market: &mut Market<TradingCoinType>,
     _: &AdminCap,
-    underlying_asset_type: String,
     decimal: u8,
 ) {
     
@@ -313,6 +284,16 @@ public fun set_underlying_asset_type_and_decimal<UnderlyingAssetType, TradingCoi
 }
 
 // ====== Helper Functions ======
+
+// charge the fee to the fee balance
+public(package) fun charge_fee<TradingCoinType>(market: &mut Market<TradingCoinType>, fee: Balance<TradingCoinType>) {
+    balance::join(&mut market.fee_balance, fee);
+}
+
+public(package) fun return_fee<TradingCoinType>(market: &mut Market<TradingCoinType>, return_amount: u64): Balance<TradingCoinType> {
+    market.fee_balance.split(return_amount)
+}
+
 
 // check if the option is able to be exercised according the current time and the exercise date and expiration date
 public fun is_option_exercisable<TradingCoinType>(market: &Market<TradingCoinType>, clock: &Clock): bool {
@@ -326,6 +307,21 @@ public fun is_option_expired<TradingCoinType>(market: &Market<TradingCoinType>, 
     option::is_some(&market.expiration_date) && current_time > *option::borrow(&market.expiration_date)
 }
 
+// check the market is active
+public fun is_market_active<TradingCoinType>(clock: &Clock, market: &Market<TradingCoinType>): bool {
+   
+    // if the TGE date and expiration date are set, check if the current time is before the TGE date
+    if (option::is_some(&market.exericse_date) && option::is_some(&market.expiration_date)) {
+        if (clock.timestamp_ms() < *option::borrow(&market.exericse_date)) {
+            return true
+        }
+        else{
+            return false
+        }
+    };
+    // if it is not set, return true
+    true
+}
 
 
 // assert whether the underlying assets is aligned with the market
@@ -342,19 +338,19 @@ public fun assert_underlying_asset_aligned<TradingCoinType>(
 
 // ====== Update Orderbook Functions ======   
 
-// push covered-put option id into orderbook's pending writer orders
-public fun push_covered_put_option_id_into_pending_writer(
+// push covered-put option id into orderbook's waiting writer orders
+public fun push_covered_put_option_id_into_waiting_writer(
     orderbook: &mut OrderBook,
     covered_put_option_id: ID,
 ) {
-    table::add(&mut orderbook.pending_writer_orders, covered_put_option_id, covered_put_option_id);
+    table::add(&mut orderbook.waiting_writer_orders, covered_put_option_id, covered_put_option_id);
 }
-// push covered-put option id into orderbook's pending buyer orders
-public fun push_covered_put_option_id_into_pending_buyer(
+// push covered-put option id into orderbook's waiting buyer orders
+public fun push_covered_put_option_id_into_waiting_buyer(
     orderbook: &mut OrderBook,
     covered_put_option_id: ID,
 ) {
-    table::add(&mut orderbook.pending_buyer_orders, covered_put_option_id, covered_put_option_id);
+    table::add(&mut orderbook.waiting_buyer_orders, covered_put_option_id, covered_put_option_id);
 }
 
 
@@ -383,20 +379,20 @@ public fun push_covered_put_option_id_into_expired(
     table::add(&mut orderbook.expired_options, covered_put_option_id, covered_put_option_id);
 }
 
-// pop up covered-put option id from orderbook's pending writer orders
-public fun pop_covered_put_option_id_from_pending_writer(
+// pop up covered-put option id from orderbook's waiting writer orders
+public fun pop_covered_put_option_id_from_waiting_writer(
     orderbook: &mut OrderBook,
     covered_put_option_id: ID,
 ) {
-    table::remove(&mut orderbook.pending_writer_orders, covered_put_option_id);
+    table::remove(&mut orderbook.waiting_writer_orders, covered_put_option_id);
 }
 
-// pop up covered-put option id from orderbook's pending buyer orders
-public fun pop_covered_put_option_id_from_pending_buyer(
+// pop up covered-put option id from orderbook's waiting buyer orders
+public fun pop_covered_put_option_id_from_waiting_buyer(
     orderbook: &mut OrderBook,
     covered_put_option_id: ID,
 ) {
-    table::remove(&mut orderbook.pending_buyer_orders, covered_put_option_id);
+    table::remove(&mut orderbook.waiting_buyer_orders, covered_put_option_id);
 }
 
 
@@ -453,4 +449,11 @@ public fun get_underlying_asset_type<TradingCoinType>(
     market: &Market<TradingCoinType>,
 ): String {
     *option::borrow(&market.underlying_asset_type)
+}
+
+// get the fee rate
+public fun get_fee_rate<TradingCoinType>(
+    market: &Market<TradingCoinType>,
+): u64 {
+    market.trading_fee_percentage
 }
