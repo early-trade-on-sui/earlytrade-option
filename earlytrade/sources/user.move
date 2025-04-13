@@ -29,6 +29,7 @@ const EOptionNotMatched: u64 = 12;
 const EOptionNotExercisable: u64 = 13;
 const EOptionNotExpired: u64 = 14;
 const EInsufficientUnderlyingAsset: u64 = 15;
+const EInvalidOption: u64 = 16;
 
 // ====== Core Data Structures ======
 
@@ -93,14 +94,15 @@ public struct OptionExpiredEvent has copy, drop {
 // ====== Public Functions ======
 
 /// Initialize user orders for a new user
-public fun init_user_orders(orderbook: &OrderBook, ctx: &mut TxContext): UserOrders {
-    UserOrders {
+public fun init_user_orders(orderbook: &OrderBook, ctx: &mut TxContext){
+    let user_orders = UserOrders {
         id: object::new(ctx),
         owner: ctx.sender(),
         orderbook_id: orderbook.get_orderbook_id(),
         maker_order_id_tracker: table::new<ID, OptionInfo>(ctx),
         taker_order_id_tracker: table::new<ID, OptionInfo>(ctx),
-    }
+    };
+    transfer::transfer(user_orders, ctx.sender());
 }
 
 /// Create a covered put option as a buyer
@@ -128,11 +130,11 @@ public fun create_option_as_buyer<TradingCoinType>(
     // handle the fee logic
     let fee_paid_by_buyer = strike_price * amount * market.get_fee_rate()/PERCENTAGE_DIVISOR;
     let mut premium_balance = premium_coin.into_balance();
-
-    
     // charge the fee to the fee balance first, leave the remaining premium balance
     earlytrade::charge_fee(market, premium_balance.split(fee_paid_by_buyer));
 
+    // assert the premium_balance.value is same as premium_value
+    assert!(premium_balance.value() == premium_value, EInvalidOption);
 
     let fee_paid_by_writer = 0;
     let status = covered_put_option::status_waiting_writer();
@@ -215,6 +217,9 @@ public fun create_option_as_writer<TradingCoinType>(
     let status = covered_put_option::status_waiting_buyer();
     let buyer = option::some(ctx.sender());
     let writer = option::none();
+
+    // assert the collateral_balance.value is same as collateral_value
+    assert!(collateral_balance.value() == collateral_value, EInvalidOption);
 
     let premium_balance = balance::zero<TradingCoinType>();
     let market_id = market.get_market_id();

@@ -119,8 +119,10 @@ public(package) fun new_option<TradingCoinType>(
     let current_time = tx_context::epoch(ctx);
 
     //assert strike_price * underlying_asset_amount = premium_balance.value + collateral_balance.value
-    assert!(strike_price * underlying_asset_amount == premium_balance.value() + collateral_balance.value(), EInvalidOption);
-    
+    assert!((strike_price * underlying_asset_amount) == (premium_value + collateral_value), EInvalidOption);
+
+
+
     CoveredPutOption<TradingCoinType> {
         id: object::new(ctx),                                // Unique object identifier
 
@@ -192,6 +194,7 @@ public(package) fun share_option<TradingCoinType>(option: CoveredPutOption<Tradi
     transfer::share_object(option);
 }
 
+
 // ====== Option Getters ======
 
 public fun get_id<TradingCoinType>(option: &CoveredPutOption<TradingCoinType>): ID {
@@ -217,6 +220,7 @@ public fun get_status<TradingCoinType>(option: &CoveredPutOption<TradingCoinType
 public fun get_underlying_asset_amount<TradingCoinType>(option: &CoveredPutOption<TradingCoinType>): u64 {
     option.underlying_asset_amount
 }
+
 
 public fun get_buyer<TradingCoinType>(option: &CoveredPutOption<TradingCoinType>): Option<address> {
     option.buyer
