@@ -75,7 +75,6 @@ public struct Market<phantom TradingCoinType> has key {
     // Market configuration
     market_name: String,                    // Name of the market: WAV-USDC, WAV-SUI, etc.
     trading_fee_percentage: u64,            // Fee percentage (100 = 1%)
-    min_trading_assets_value: u64,         // Minimum trading assets value(When users wanna place an order, the value of the assets should be greater than the min_trading_assets_value)
     
     // Administrator info
     fee_balance: Balance<TradingCoinType>,   // Accumulated fees for admin withdrawal
@@ -185,7 +184,6 @@ public fun create_market<TradingCoinType>(
     name: String,
     orderbook: &mut OrderBook,
     clock: &Clock,
-    min_trading_assets_value: u64,
     trading_fee_percentage: u64,
     ctx: &mut TxContext
 ) {
@@ -199,7 +197,6 @@ public fun create_market<TradingCoinType>(
         market_name: name,
 
         trading_fee_percentage: trading_fee_percentage,
-        min_trading_assets_value: min_trading_assets_value,
         fee_balance: balance::zero(),
 
         creation_date: current_time,
