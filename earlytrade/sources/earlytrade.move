@@ -44,25 +44,21 @@ Administrator:
 module earlytrade::earlytrade;
 
 use sui::balance::{Self, Balance};
-use sui::coin::{Self, Coin};
+use sui::coin::Coin;
 use sui::table::{Self, Table};
 use sui::event;
 
 use std::string::{Self, String};
 use sui::clock::Clock;
 use std::type_name;
+use earlytrade::covered_put_option::{Self, CoveredPutOption, OptionInfo};
 
 
 // ====== Constants ======
-
-
 // Error codes
-
-const EInvalidDate: u64 = 7;
-
-const EUnderlyingAssetNotSet: u64 = 10;
-
-const EUnderlyingAssetNotAligned: u64 = 13;
+const EInvalidDate: u64 = 1;
+const EUnderlyingAssetNotSet: u64 = 2;
+const EUnderlyingAssetNotAligned: u64 = 3;
 
 // ====== Core Data Structures ======
 
@@ -111,14 +107,13 @@ public struct OrderBook has key {
     market_id: vector<ID>,                  // Reference to markets(Buck, USDC, SUI and etc.)
     
     // Primary market orders
-    waiting_writer_orders: Table<ID,ID>,  
-    waiting_buyer_orders: Table<ID,ID>,   
+    waiting_writer_orders: Table<ID, OptionInfo>,  
+    waiting_buyer_orders: Table<ID, OptionInfo>,   
     
-    
-    // Status tracking
-    active_options: Table<ID, ID>,                // Active options
-    exercised_options: Table<ID, ID>,             // Exercised options
-    expired_options: Table<ID, ID>,               // Expired options
+    // Order id tracking
+    active_options: Table<ID, OptionInfo>,                // Active options
+    exercised_options: Table<ID, OptionInfo>,             // Exercised options
+    expired_options: Table<ID, OptionInfo>,               // Expired options
     
     // Statistics
     created_at: u64,                        // When orderbook was created
@@ -164,12 +159,12 @@ public fun init_orderbook(
         name: orderbook_name,
         market_id: vector::empty(),
 
-        waiting_writer_orders: table::new<ID,ID>(ctx),
-        waiting_buyer_orders: table::new<ID,ID>(ctx),
+        waiting_writer_orders: table::new<ID,OptionInfo>(ctx),
+        waiting_buyer_orders: table::new<ID,OptionInfo>(ctx),
 
-        active_options: table::new<ID,ID>(ctx),
-        exercised_options: table::new<ID,ID>(ctx),
-        expired_options: table::new<ID,ID>(ctx),
+        active_options: table::new<ID,OptionInfo>(ctx),
+        exercised_options: table::new<ID,OptionInfo>(ctx),
+        expired_options: table::new<ID,OptionInfo>(ctx),
         
         created_at: current_time,
     };
@@ -236,13 +231,11 @@ public fun create_market<TradingCoinType>(
 }
 
 
-
-
 // ====== Market Admin Functions ======
 
 /// Set TGE date (admin only)
-public fun set_exericse_expiration_date<CoinType>(
-    market: &mut Market<CoinType>,
+public fun set_exericse_expiration_date<TradingCoinType>(
+    market: &mut Market<TradingCoinType>,
     _: &AdminCap,
     clock: &Clock,
     exericse_date: u64,
@@ -259,26 +252,24 @@ public fun set_exericse_expiration_date<CoinType>(
 }
 
 /// Withdraw accumulated fees (admin only)
-public fun withdraw_fees<CoinType>(
-    market: &mut Market<CoinType>,
+public fun withdraw_fees<TradingCoinType>(
+    market: &mut Market<TradingCoinType>,
     _: &AdminCap,
     ctx: &mut TxContext
-): Coin<CoinType> {
+): Coin<TradingCoinType> {
 
     // Extract all accumulated fees
     let fee_balance = balance::withdraw_all(&mut market.fee_balance);
-    coin::from_balance(fee_balance, ctx)
+    fee_balance.into_coin(ctx)
 }
 
-/// set the underlying asset type and decimal
+/// set the underlying asset type and decimal(admin only)
 public fun set_underlying_asset_type_and_decimal<UnderlyingAssetType, TradingCoinType>(
     market: &mut Market<TradingCoinType>,
     _: &AdminCap,
     decimal: u8,
 ) {
-    
     market.underlying_asset_type = option::some(string::from_ascii(*type_name::borrow_string(&type_name::get<UnderlyingAssetType>())));
-    
     market.decimal = decimal;
 
 }
@@ -339,77 +330,74 @@ public fun assert_underlying_asset_aligned<TradingCoinType>(
 // ====== Update Orderbook Functions ======   
 
 // push covered-put option id into orderbook's waiting writer orders
-public fun push_covered_put_option_id_into_waiting_writer(
+public fun push_covered_put_option_id_into_waiting_writer<TradingCoinType>(
     orderbook: &mut OrderBook,
-    covered_put_option_id: ID,
+    option: &CoveredPutOption<TradingCoinType>,
 ) {
-    table::add(&mut orderbook.waiting_writer_orders, covered_put_option_id, covered_put_option_id);
+    table::add(&mut orderbook.waiting_writer_orders, option.get_id(), covered_put_option::get_option_info(option));
 }
 // push covered-put option id into orderbook's waiting buyer orders
-public fun push_covered_put_option_id_into_waiting_buyer(
+public fun push_covered_put_option_id_into_waiting_buyer<TradingCoinType>(
     orderbook: &mut OrderBook,
-    covered_put_option_id: ID,
+    option: &CoveredPutOption<TradingCoinType>,
 ) {
-    table::add(&mut orderbook.waiting_buyer_orders, covered_put_option_id, covered_put_option_id);
+    table::add(&mut orderbook.waiting_buyer_orders, option.get_id(), covered_put_option::get_option_info(option));
 }
-
-
-
 // push covered-put option id into orderbook's active options
-public fun push_covered_put_option_id_into_active(
+public fun push_covered_put_option_id_into_active<TradingCoinType>(
     orderbook: &mut OrderBook,
-    covered_put_option_id: ID,
+    option: &CoveredPutOption<TradingCoinType>,
 ) {
-    table::add(&mut orderbook.active_options, covered_put_option_id, covered_put_option_id);
+    table::add(&mut orderbook.active_options, option.get_id(), covered_put_option::get_option_info(option));
 }
 
 // push covered-put option id into orderbook's exercised options
-public fun push_covered_put_option_id_into_exercised(
+public fun push_covered_put_option_id_into_exercised<TradingCoinType>(
     orderbook: &mut OrderBook,
-    covered_put_option_id: ID,
+    option: &CoveredPutOption<TradingCoinType>,
 ) {
-    table::add(&mut orderbook.exercised_options, covered_put_option_id, covered_put_option_id);
+    table::add(&mut orderbook.exercised_options, option.get_id(), covered_put_option::get_option_info(option));
 }
 
 // push covered-put option id into orderbook's expired options
-public fun push_covered_put_option_id_into_expired(
+public fun push_covered_put_option_id_into_expired<TradingCoinType>(
     orderbook: &mut OrderBook,
-    covered_put_option_id: ID,
+    option: &CoveredPutOption<TradingCoinType>,
 ) {
-    table::add(&mut orderbook.expired_options, covered_put_option_id, covered_put_option_id);
+    table::add(&mut orderbook.expired_options, option.get_id(), covered_put_option::get_option_info(option));
 }
 
 // pop up covered-put option id from orderbook's waiting writer orders
-public fun pop_covered_put_option_id_from_waiting_writer(
+public fun pop_covered_put_option_id_from_waiting_writer<TradingCoinType>(
     orderbook: &mut OrderBook,
-    covered_put_option_id: ID,
+    option: &CoveredPutOption<TradingCoinType>,
 ) {
-    table::remove(&mut orderbook.waiting_writer_orders, covered_put_option_id);
+    table::remove(&mut orderbook.waiting_writer_orders, option.get_id());
 }
 
 // pop up covered-put option id from orderbook's waiting buyer orders
-public fun pop_covered_put_option_id_from_waiting_buyer(
+public fun pop_covered_put_option_id_from_waiting_buyer<TradingCoinType>(
     orderbook: &mut OrderBook,
-    covered_put_option_id: ID,
+    option: &CoveredPutOption<TradingCoinType>,
 ) {
-    table::remove(&mut orderbook.waiting_buyer_orders, covered_put_option_id);
+    table::remove(&mut orderbook.waiting_buyer_orders, option.get_id());
 }
 
 
 // pop up covered-put option id from orderbook's active options 
-public fun pop_covered_put_option_id_from_active(
+public fun pop_covered_put_option_id_from_active<TradingCoinType>(
     orderbook: &mut OrderBook,
-    covered_put_option_id: ID,
+    option: &CoveredPutOption<TradingCoinType>,
 ) {
-    table::remove(&mut orderbook.active_options, covered_put_option_id);
+    table::remove(&mut orderbook.active_options, option.get_id());
 }
 
 // pop up covered-put option id from orderbook's exercised options
-public fun pop_covered_put_option_id_from_exercised(
+public fun pop_covered_put_option_id_from_exercised<TradingCoinType>(
     orderbook: &mut OrderBook,
-    covered_put_option_id: ID,
+    option: &CoveredPutOption<TradingCoinType>,
 ) {
-    table::remove(&mut orderbook.exercised_options, covered_put_option_id);
+    table::remove(&mut orderbook.exercised_options, option.get_id());
 }
 
 // pop up covered-put option id from orderbook's expired options
@@ -456,4 +444,10 @@ public fun get_fee_rate<TradingCoinType>(
     market: &Market<TradingCoinType>,
 ): u64 {
     market.trading_fee_percentage
+}
+
+
+#[test_only]
+public fun init_for_testing(ctx: &mut TxContext) {
+    init(ctx);
 }

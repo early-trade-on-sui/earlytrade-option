@@ -3,10 +3,13 @@ module earlytrade::user;
 use sui::balance;
 use sui::coin::{Coin};
 use sui::event;
+use std::string;
+use std::type_name;
 use sui::clock::Clock;
-
+use sui::table::{Self, Table};
 use earlytrade::earlytrade::{Self, Market, OrderBook};
-use earlytrade::covered_put_option::{Self, CoveredPutOption};
+use earlytrade::covered_put_option::{Self, CoveredPutOption, OptionInfo};
+use std::u64;
 
 // ====== Constants ======
 
@@ -21,7 +24,11 @@ const EInsufficientCollateral: u64 = 6;
 const EInsufficientPremium: u64 = 7;
 const EMarketNotActive: u64 = 8;
 const EInvalidStrikePrice: u64 = 9;
-const EOptionNotFound: u64 = 10;
+const EOptionNotActive: u64 = 11;
+const EOptionNotMatched: u64 = 12;
+const EOptionNotExercisable: u64 = 13;
+const EOptionNotExpired: u64 = 14;
+const EInsufficientUnderlyingAsset: u64 = 15;
 
 // ====== Core Data Structures ======
 
@@ -29,8 +36,58 @@ public struct UserOrders has key {
     id: UID,
     owner: address,
     orderbook_id: ID,
-    maker_order_id_tracker: vector<ID>,
-    taker_order_id_tracker: vector<ID>,
+    maker_order_id_tracker: Table<ID, OptionInfo>,
+    taker_order_id_tracker: Table<ID, OptionInfo>,
+}
+
+// ======== Event Structs ========
+public struct OptionCreatedEvent has copy, drop {
+    option_id: ID,
+    creator: address,
+    strike_price: u64,
+    premium_value: u64,
+    collateral_value: u64,
+    amount: u64,
+    is_buyer: bool,
+    market_id: ID,
+}
+
+public struct OptionCancelledEvent has copy, drop {
+    option_id: ID,
+    canceller: address,
+    market_id: ID,
+}
+
+public struct OptionFilledEvent has copy, drop {
+    option_id: ID,
+    buyer: address,
+    writer: address,
+    strike_price: u64,
+    premium_value: u64,
+    amount: u64,
+    market_id: ID,
+}
+
+public struct OptionExercisedEvent has copy, drop {
+    option_id: ID,
+    buyer: address,
+    writer: address,
+    strike_price: u64,
+    premium_value: u64,
+    collateral_value: u64,
+    amount: u64,
+    market_id: ID,
+}
+
+public struct OptionExpiredEvent has copy, drop {
+    option_id: ID,
+    buyer: address,
+    writer: address,
+    strike_price: u64,
+    premium_value: u64,
+    collateral_value: u64,
+    amount: u64,
+    market_id: ID,
 }
 
 // ====== Public Functions ======
@@ -41,8 +98,8 @@ public fun init_user_orders(orderbook: &OrderBook, ctx: &mut TxContext): UserOrd
         id: object::new(ctx),
         owner: ctx.sender(),
         orderbook_id: orderbook.get_orderbook_id(),
-        maker_order_id_tracker: vector::empty(),
-        taker_order_id_tracker: vector::empty(),
+        maker_order_id_tracker: table::new<ID, OptionInfo>(ctx),
+        taker_order_id_tracker: table::new<ID, OptionInfo>(ctx),
     }
 }
 
@@ -86,26 +143,26 @@ public fun create_option_as_buyer<TradingCoinType>(
     let creator_is_buyer = true;
 
     let option = covered_put_option::new_option(
-    strike_price,
-    premium_value,
-    collateral_value,
-    amount,
-    fee_paid_by_buyer,
-    fee_paid_by_writer,
-    status,
-    buyer,
-    writer,
-    premium_balance,
-    collateral_balance,
-    market_id,
-    creator_is_buyer,
-    ctx
+        strike_price,
+        premium_value,
+        collateral_value,
+        amount,
+        fee_paid_by_buyer,
+        fee_paid_by_writer,
+        status,
+        buyer,
+        writer,
+        premium_balance,
+        collateral_balance,
+        market_id,
+        creator_is_buyer,
+        ctx
     );
 
     // push the option into the waiting orders
-    vector::push_back(&mut user_orders.maker_order_id_tracker, option.get_id());
+    table::add(&mut user_orders.maker_order_id_tracker, option.get_id(), covered_put_option::get_option_info(&option));
     // push the option id into the orderbook
-    earlytrade::push_covered_put_option_id_into_waiting_writer(orderbook, option.get_id());
+    earlytrade::push_covered_put_option_id_into_waiting_writer(orderbook, &option);
 
 
     // Emit event for option creation
@@ -163,7 +220,7 @@ public fun create_option_as_writer<TradingCoinType>(
     let market_id = market.get_market_id();
     let creator_is_buyer = false;
 
-    let option = covered_put_option::new_option(
+    let option = covered_put_option::new_option<TradingCoinType>(
     strike_price,
     premium_value,
     collateral_value,
@@ -180,9 +237,10 @@ public fun create_option_as_writer<TradingCoinType>(
     ctx
     );
     // push the option into the waiting orders
-    vector::push_back(&mut user_orders.maker_order_id_tracker, option.get_id());
+    table::add(&mut user_orders.maker_order_id_tracker, option.get_id(), covered_put_option::get_option_info(&option));
+
     // push the option id into the orderbook
-    earlytrade::push_covered_put_option_id_into_waiting_buyer(orderbook, option.get_id());
+    earlytrade::push_covered_put_option_id_into_waiting_buyer(orderbook, &option);
 
 
     // Emit event for option creation
@@ -219,16 +277,7 @@ public fun cancel_option<TradingCoinType>(
     assert!(ctx.sender() == option.get_creator_address(), ENotAuthorized);
 
     // pop up the option id from the waiting orders
-    // Find the index of the option ID in the waiting orders vector
-    let (found, index) = vector::index_of(&user_orders.maker_order_id_tracker, &option.get_id());
-    
-    // If the option ID is found, remove it from the vector
-    if (found) {
-        vector::remove(&mut user_orders.maker_order_id_tracker, index);
-    } else {
-        // Option ID not found in the waiting orders
-        abort EOptionNotFound
-    };
+    table::remove(&mut user_orders.maker_order_id_tracker, option.get_id());
 
     // Emit event for option cancellation
     event::emit(OptionCancelledEvent {
@@ -239,32 +288,28 @@ public fun cancel_option<TradingCoinType>(
 
     let fee_paid_by_buyer = option.get_fee_paid_by_buyer();
     let fee_paid_by_writer = option.get_fee_paid_by_writer();
-    let option_id = option.get_id();
     let mut withdraw_balance = balance::zero<TradingCoinType>();
     let mut return_fee = balance::zero<TradingCoinType>();
 
-    let (status, premium_balance, collateral_balance) = covered_put_option::destroy_option<TradingCoinType>(option);
-
-    if (status == covered_put_option::status_waiting_buyer()) {
+    if (option.get_status() == covered_put_option::status_waiting_buyer()) {
         // this is the a covered put option seller
         // pop up the option id from the orderbook
-        earlytrade::pop_covered_put_option_id_from_waiting_buyer(orderbook, option_id);
+        earlytrade::pop_covered_put_option_id_from_waiting_buyer(orderbook, &option);
         return_fee.join( earlytrade::return_fee(market, fee_paid_by_writer));
         
-    } else if (status == covered_put_option::status_waiting_writer()) {
+    } else if (option.get_status() == covered_put_option::status_waiting_writer()) {
         // pop up the option id from the orderbook
-        earlytrade::pop_covered_put_option_id_from_waiting_writer(orderbook, option_id);
+        earlytrade::pop_covered_put_option_id_from_waiting_writer(orderbook, &option);
         return_fee.join(earlytrade::return_fee(market, fee_paid_by_buyer));        
     };
+
+    let ( premium_balance, collateral_balance) = covered_put_option::destroy_option<TradingCoinType>(option);
 
     withdraw_balance.join(collateral_balance);
     withdraw_balance.join(premium_balance);
     withdraw_balance.join(return_fee);
 
     let withdraw_coin = withdraw_balance.into_coin(ctx);
-
-
-
     withdraw_coin
 }
 
@@ -288,7 +333,7 @@ public fun fill_option_as_buyer<CoinType>(
     let option_id = option.get_id();
     let option_strike_price = option.get_strike_price();
     let option_premium_value = option.get_premium();
-    let option_amount = option.get_amount();
+    let option_amount = option.get_underlying_asset_amount();
 
     // calculate the fee paid by the buyer
     let fee_paid_by_buyer = option_strike_price * option_amount * market.get_fee_rate()/PERCENTAGE_DIVISOR;
@@ -311,11 +356,11 @@ public fun fill_option_as_buyer<CoinType>(
     covered_put_option::set_buyer(option, ctx.sender());
 
     // update user orders
-    vector::push_back(&mut user_orders.taker_order_id_tracker, option_id);
+    table::add(&mut user_orders.taker_order_id_tracker, option_id, covered_put_option::get_option_info(option));
     // pop up the option id from the orderbook
-    earlytrade::pop_covered_put_option_id_from_waiting_buyer(orderbook, option_id);
+    earlytrade::pop_covered_put_option_id_from_waiting_buyer(orderbook, option);
     // push the option id into the orderbook
-    earlytrade::push_covered_put_option_id_into_active(orderbook, option_id);
+    earlytrade::push_covered_put_option_id_into_active(orderbook, option);
     
     // Emit event for option fill
     event::emit(OptionFilledEvent {
@@ -324,7 +369,7 @@ public fun fill_option_as_buyer<CoinType>(
         writer: option::extract(&mut option.get_writer()),
         strike_price: option.get_strike_price(),
         premium_value: option.get_premium(),
-        amount: option.get_amount(),
+        amount: option.get_underlying_asset_amount(),
         market_id: market.get_market_id(),
     });
 }
@@ -351,7 +396,7 @@ public fun fill_option_as_writer<CoinType>(
     let option_id = option.get_id();
     let option_strike_price = option.get_strike_price();
     let option_collateral_amount = option.get_collateral_amount();
-    let option_amount = option.get_amount();
+    let option_amount = option.get_underlying_asset_amount();
 
     // calculate the fee paid by the writer
     let fee_paid_by_writer = option_strike_price * option_amount * market.get_fee_rate()/PERCENTAGE_DIVISOR;
@@ -376,11 +421,11 @@ public fun fill_option_as_writer<CoinType>(
     covered_put_option::set_writer(option, ctx.sender());
 
     // update user orders
-    vector::push_back(&mut user_orders.taker_order_id_tracker, option_id);
+    table::add(&mut user_orders.taker_order_id_tracker, option_id, covered_put_option::get_option_info(option));
     // pop up the option id from the orderbook
-    earlytrade::pop_covered_put_option_id_from_waiting_writer(orderbook, option_id);
+    earlytrade::pop_covered_put_option_id_from_waiting_writer(orderbook, option);
     // push the option id into the orderbook
-    earlytrade::push_covered_put_option_id_into_active(orderbook, option_id);
+    earlytrade::push_covered_put_option_id_into_active(orderbook, option);
 
     // Emit event for option fill
     event::emit(OptionFilledEvent {
@@ -389,35 +434,105 @@ public fun fill_option_as_writer<CoinType>(
         writer: ctx.sender(),
         strike_price: option.get_strike_price(),
         premium_value: option.get_premium(),
-        amount: option.get_amount(),
+        amount: option.get_underlying_asset_amount(),
         market_id: market.get_market_id(),
     });
 }
 
-// Add event structs at the top of the file after the constants
-public struct OptionCreatedEvent has copy, drop {
-    option_id: ID,
-    creator: address,
-    strike_price: u64,
-    premium_value: u64,
-    collateral_value: u64,
-    amount: u64,
-    is_buyer: bool,
-    market_id: ID,
+// exericese option
+public fun buyer_exercise_option<UnderlyingAssetType, TradingCoinType>(
+    option: &mut CoveredPutOption<TradingCoinType>, 
+    orderbook: &mut OrderBook, 
+    underlying_asset: Coin<UnderlyingAssetType>,
+    market: &Market<TradingCoinType>, 
+    clock: &Clock, 
+    ctx: &mut TxContext) {
+
+    // check option status and is matched
+    assert!(option.get_status() == covered_put_option::status_matched(), EOptionNotActive);
+    assert!(option.get_buyer().is_some(), EOptionNotMatched);
+    assert!(option.get_writer().is_some(), EOptionNotMatched);
+
+    // update the orderbook move option id from the active to the exercised
+    earlytrade::pop_covered_put_option_id_from_active(orderbook, option);
+    earlytrade::push_covered_put_option_id_into_exercised(orderbook, option);
+
+    // check if the option is able to be exercised
+    assert!(earlytrade::is_option_exercisable<TradingCoinType>(market, clock), EOptionNotExercisable);
+
+    let underlying_asset_type = string::from_ascii(*type_name::borrow_string(&type_name::get<UnderlyingAssetType>()));
+    // check if the underlying assets is alinged with the market config
+    earlytrade::assert_underlying_asset_aligned<TradingCoinType>(market, underlying_asset_type);
+    
+    // check if the underlying asset amount is enough to exercise the option
+    let required_underlying_asset_value = option.get_underlying_asset_amount() * u64::pow(10, earlytrade::get_underlying_asset_decimal<TradingCoinType>(market));
+    assert!(underlying_asset.value() >= required_underlying_asset_value, EInsufficientUnderlyingAsset);
+
+    // transfer the the underlying assets to the seller
+    transfer::public_transfer(underlying_asset, *option::borrow(&option.get_writer()));
+
+    // take the premium and collateral balance from the option
+    let mut premium_collateral_balance = option.withdraw_premium();
+    premium_collateral_balance.join(option.withdraw_collateral());
+
+    // transfer the premium and collateral balance to the seller
+    transfer::public_transfer(premium_collateral_balance.into_coin(ctx), *option::borrow(&option.get_writer()));
+
+    // set the option status to exercised
+    option.set_status(clock, covered_put_option::status_exercised());
+
+    // Emit event for option exercise
+    event::emit(OptionExercisedEvent {
+        option_id: option.get_id(),
+        buyer: *option::borrow(&option.get_buyer()),
+        writer: *option::borrow(&option.get_writer()),
+        strike_price: option.get_strike_price(),
+        premium_value: option.get_premium(),
+        collateral_value: option.get_collateral_amount(),
+        amount: option.get_underlying_asset_amount(),
+        market_id: market.get_market_id(),
+    });
 }
 
-public struct OptionCancelledEvent has copy, drop {
-    option_id: ID,
-    canceller: address,
-    market_id: ID,
-}
+// seller take back premium and collateral balance from the expired option
+public fun seller_take_back_premium_and_collateral<TradingCoinType>(
+    option: &mut CoveredPutOption<TradingCoinType>, 
+    orderbook: &mut OrderBook, 
+    market: &Market<TradingCoinType>, 
+    clock: &Clock, 
+    ctx: &mut TxContext) {
+    
+    // check option status and is matched
+    assert!(option.get_status() == covered_put_option::status_matched(), EOptionNotExpired);
+    assert!(option.get_buyer().is_some(), EOptionNotMatched);
+    assert!(option.get_writer().is_some(), EOptionNotMatched);
 
-public struct OptionFilledEvent has copy, drop {
-    option_id: ID,
-    buyer: address,
-    writer: address,
-    strike_price: u64,
-    premium_value: u64,
-    amount: u64,
-    market_id: ID,
+    // update the orderbook move option id from the active to the expired
+    earlytrade::pop_covered_put_option_id_from_active(orderbook, option);
+    earlytrade::push_covered_put_option_id_into_expired(orderbook, option);
+    
+    // check if the option is expired
+    assert!(earlytrade::is_option_expired<TradingCoinType>(market, clock), EOptionNotExpired);
+
+    // take the premium and collateral balance from the option
+    let mut premium_collateral_balance = option.withdraw_premium();
+    premium_collateral_balance.join(option.withdraw_collateral());
+
+    // transfer the premium and collateral balance to the seller
+    transfer::public_transfer(premium_collateral_balance.into_coin(ctx), *option::borrow(&option.get_writer()));
+
+    // set the option status to expired
+    option.set_status(clock, covered_put_option::status_expired());
+
+    // Emit event for option expiration
+    event::emit(OptionExpiredEvent {
+        option_id: option.get_id(),
+        buyer: *option::borrow(&option.get_buyer()),
+        writer: *option::borrow(&option.get_writer()),
+        strike_price: option.get_strike_price(),
+        premium_value: option.get_premium(),
+        collateral_value: option.get_collateral_amount(),
+        amount: option.get_underlying_asset_amount(),
+        market_id: market.get_market_id(),
+    });
 }
