@@ -209,7 +209,7 @@ public fun get_premium<TradingCoinType>(option: &CoveredPutOption<TradingCoinTyp
     option.premium_value
 }
 
-public fun get_collateral_amount<TradingCoinType>(option: &CoveredPutOption<TradingCoinType>): u64 {
+public fun get_collateral_value<TradingCoinType>(option: &CoveredPutOption<TradingCoinType>): u64 {
     option.collateral_value
 }
 

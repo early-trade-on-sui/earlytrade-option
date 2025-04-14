@@ -9,6 +9,7 @@ use earlytrade::earlytrade::{Self, AdminCap, OrderBook, Market};
 use std::string;
 use sui::clock::{Self, Clock};
 use earlytrade::user::{Self, UserOrders};
+use earlytrade::covered_put_option::{Self, CoveredPutOption};
 use sui::coin::{Self, Coin};
 
 const ADMIN: address = @0x1;
@@ -68,7 +69,7 @@ public fun setup(): (Scenario, Clock) {
 
 
 #[test]
-public fun test_place_order(): (Scenario, Clock) {
+public fun test_buyer_place_order(): (Scenario, Clock) {
     let (mut scenario, mut clock) = setup();
 
     clock::increment_for_testing(&mut clock, ONE_DAY_IN_MS);
@@ -118,9 +119,251 @@ public fun test_place_order(): (Scenario, Clock) {
        test_scenario::return_to_sender(&scenario, user_orders);
     };
 
+
+
+
     (scenario, clock)
 }
 
 
+// test writer place order
+#[test]
+public fun test_writer_place_order(): (Scenario, Clock) {
+    let (mut scenario, mut clock) = setup();
+
+    clock::increment_for_testing(&mut clock, ONE_DAY_IN_MS);
+
+    scenario.next_tx(WRITER);{
+        let mut user_orders = scenario.take_from_sender<UserOrders>();
+        let mut orderbook = scenario.take_shared<OrderBook>();
+        let mut market = scenario.take_shared<Market<USDC>>();
+        
+        // get the option
+        let premium_value:u64 = 5_000;
+        let collateral_value:u64    = 5_000;
+        let amount:u64 = 1;
+        let strike_price:u64 = 10_000;
+
+        let fee_paid_by_buyer = strike_price * amount * market.get_fee_rate()/PERCENTAGE_DIVISOR;
+        let collateral_coin = coin::mint_for_testing<USDC>(premium_value +fee_paid_by_buyer, scenario.ctx());
+        
+        // cancel the option
+        user::create_option_as_writer<USDC>(
+            &mut user_orders,
+            &mut orderbook,
+            &mut market,
+            strike_price,
+            premium_value,
+            collateral_value,
+            amount,
+            
+            &clock, collateral_coin, scenario.ctx());
+
+        // return objects to the scenario
+        test_scenario::return_shared(market);
+        test_scenario::return_shared(orderbook);
+        test_scenario::return_to_sender(&scenario, user_orders);
+    };
+
+    (scenario, clock)
+}
+
+// test cancel option
+#[test]
+public fun test_buyer_cancel_option(): (Scenario, Clock) {
+    let (mut scenario, mut clock) = test_buyer_place_order();
+
+    clock::increment_for_testing(&mut clock, ONE_DAY_IN_MS);
+
+    scenario.next_tx(BUYER);{
+        let mut user_orders = scenario.take_from_sender<UserOrders>();
+        let mut orderbook = scenario.take_shared<OrderBook>();
+        let mut market = scenario.take_shared<Market<USDC>>();
+ 
+        let option = scenario.take_shared<CoveredPutOption<USDC>>();
+        
+        // cancel the option
+        let return_coin = user::cancel_option<USDC>(
+            &mut user_orders,
+            &mut orderbook,
+            &mut market, option, scenario.ctx());
+        
+        std::debug::print(&return_coin.value());
+
+        transfer::public_transfer(return_coin, scenario.ctx().sender());
+
+        // return objects to the scenario
+        test_scenario::return_shared(market);
+        test_scenario::return_shared(orderbook);
+        test_scenario::return_to_sender(&scenario, user_orders);
+    };
+    
+    (scenario, clock)
+}
+
+#[test]
+public fun test_writer_cancel_option(): (Scenario, Clock) {
+    let (mut scenario, mut clock) = test_writer_place_order();
+
+    clock::increment_for_testing(&mut clock, ONE_DAY_IN_MS);
+    
+    scenario.next_tx(WRITER);{
+        let mut user_orders = scenario.take_from_sender<UserOrders>();
+        let mut orderbook = scenario.take_shared<OrderBook>();
+        let mut market = scenario.take_shared<Market<USDC>>();
+        
+        let option = scenario.take_shared<CoveredPutOption<USDC>>();
+
+        // cancel the option
+        let return_coin = user::cancel_option<USDC>(
+            &mut user_orders,
+            &mut orderbook,
+            &mut market, option, scenario.ctx());
+
+        std::debug::print(&return_coin.value());
+
+        transfer::public_transfer(return_coin, scenario.ctx().sender());
+
+        // return objects to the scenario
+        test_scenario::return_shared(market);
+        test_scenario::return_shared(orderbook);
+        test_scenario::return_to_sender(&scenario, user_orders);
+    };
+
+    (scenario, clock)
+}
+
+// test buyer fill order 
+#[test]
+public fun test_buyer_fill_order(): (Scenario, Clock) {
+    let (mut scenario, mut clock) = test_writer_place_order();
+
+    clock::increment_for_testing(&mut clock, ONE_DAY_IN_MS);
+
+    scenario.next_tx(BUYER);{
+        let mut user_orders = scenario.take_from_sender<UserOrders>();
+        let mut orderbook = scenario.take_shared<OrderBook>();
+        let mut market = scenario.take_shared<Market<USDC>>();
+
+        let mut option = scenario.take_shared<CoveredPutOption<USDC>>();
+
+        let strike_price = option.get_strike_price();
+        let amount = option.get_underlying_asset_amount();
+
+        let fee_paid_by_buyer = strike_price * amount * market.get_fee_rate()/PERCENTAGE_DIVISOR;
+        let premium_value = option.get_premium();
+
+        // fill the order
+        // create premium coin
+        let premium_coin = coin::mint_for_testing<USDC>(fee_paid_by_buyer+premium_value, scenario.ctx());
+        
+        // fill the option as buyer
+        user::fill_option_as_buyer<USDC>(
+            &mut user_orders,
+            &mut orderbook,
+            &mut market,
+            &mut option,
+            &clock,
+            premium_coin,
+            scenario.ctx()
+        );
+        // return objects to the scenario
+        test_scenario::return_shared(option);
+        test_scenario::return_shared(market);
+        test_scenario::return_shared(orderbook);
+        test_scenario::return_to_sender(&scenario, user_orders);
+    };
+
+    (scenario, clock)
+}
 
 
+#[test]
+// test writer fill order
+public fun test_writer_fill_order(): (Scenario, Clock) {
+    let (mut scenario, mut clock) = test_buyer_place_order();
+
+    clock::increment_for_testing(&mut clock, ONE_DAY_IN_MS);
+    
+    scenario.next_tx(WRITER);{
+        let mut user_orders = scenario.take_from_sender<UserOrders>();
+        let mut orderbook = scenario.take_shared<OrderBook>();
+        let mut market = scenario.take_shared<Market<USDC>>();
+
+        let mut option = scenario.take_shared<CoveredPutOption<USDC>>();
+
+        let strike_price = option.get_strike_price();
+        let amount = option.get_underlying_asset_amount();
+
+        let fee_paid_by_buyer = strike_price * amount * market.get_fee_rate()/PERCENTAGE_DIVISOR;
+        let collateral_value = option.get_collateral_value();
+
+        // fill the order
+        // create premium coin
+        let collateral_coin = coin::mint_for_testing<USDC>(fee_paid_by_buyer+collateral_value, scenario.ctx());
+        
+        // fill the option as buyer
+        user::fill_option_as_writer<USDC>(
+            &mut user_orders,
+            &mut orderbook,
+            &mut market,
+            &mut option,
+            &clock,
+            collateral_coin,
+            scenario.ctx()
+        );
+        // return objects to the scenario
+        test_scenario::return_shared(option);
+        test_scenario::return_shared(market);
+        test_scenario::return_shared(orderbook);
+        test_scenario::return_to_sender(&scenario, user_orders);
+    };
+
+    (scenario, clock)
+}
+
+// test add exercise date and expiration date
+
+
+// test add settlemnt coin and decimal
+
+
+// test buyer exercise option
+
+
+
+// test writer reclaim collateral after expiration
+
+
+
+
+// withdraw fees as admin
+#[test]
+public fun test_withdraw_fees_as_admin() {
+    let (mut scenario, clock) = test_writer_fill_order();
+
+
+    scenario.next_tx(ADMIN);{
+        let admin_cap = scenario.take_from_sender<AdminCap>();
+        let mut market = scenario.take_shared<Market<USDC>>();
+        
+        // withdraw fees
+        let fee_coin = earlytrade::withdraw_fees<USDC>(
+            &mut market,
+            &admin_cap,
+            scenario.ctx()
+        );
+
+        std::debug::print(&fee_coin.value());
+
+        transfer::public_transfer(fee_coin, scenario.ctx().sender());
+
+        scenario.return_to_sender(admin_cap);
+
+        // return objects to the scenario
+        test_scenario::return_shared(market);
+    };
+
+    clock::destroy_for_testing(clock);
+    scenario.end();
+}

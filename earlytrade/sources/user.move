@@ -215,8 +215,8 @@ public fun create_option_as_writer<TradingCoinType>(
     earlytrade::charge_fee(market, collateral_balance.split(fee_paid_by_writer));
 
     let status = covered_put_option::status_waiting_buyer();
-    let buyer = option::some(ctx.sender());
-    let writer = option::none();
+    let writer = option::some(ctx.sender());
+    let buyer = option::none();
 
     // assert the collateral_balance.value is same as collateral_value
     assert!(collateral_balance.value() == collateral_value, EInvalidOption);
@@ -392,15 +392,12 @@ public fun fill_option_as_writer<CoinType>(
     // check if the option is waiting writer
     assert!(option.get_status() == covered_put_option::status_waiting_writer(), EInvalidStatus);
 
-    // check if the option is matched
-    assert!(option.get_writer() == option::some(ctx.sender()), ENotAuthorized);
-
     // check the market is active
     assert!(earlytrade::is_market_active(clock, market), EMarketNotActive);
     
     let option_id = option.get_id();
     let option_strike_price = option.get_strike_price();
-    let option_collateral_amount = option.get_collateral_amount();
+    let option_collateral_amount = option.get_collateral_value();
     let option_amount = option.get_underlying_asset_amount();
 
     // calculate the fee paid by the writer
@@ -493,7 +490,7 @@ public fun buyer_exercise_option<UnderlyingAssetType, TradingCoinType>(
         writer: *option::borrow(&option.get_writer()),
         strike_price: option.get_strike_price(),
         premium_value: option.get_premium(),
-        collateral_value: option.get_collateral_amount(),
+        collateral_value: option.get_collateral_value(),
         amount: option.get_underlying_asset_amount(),
         market_id: market.get_market_id(),
     });
@@ -536,8 +533,9 @@ public fun seller_take_back_premium_and_collateral<TradingCoinType>(
         writer: *option::borrow(&option.get_writer()),
         strike_price: option.get_strike_price(),
         premium_value: option.get_premium(),
-        collateral_value: option.get_collateral_amount(),
+        collateral_value: option.get_collateral_value(),
         amount: option.get_underlying_asset_amount(),
         market_id: market.get_market_id(),
     });
 }
+
