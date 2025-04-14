@@ -4,7 +4,7 @@ use sui::url;
 
 public struct TEST_COIN has drop {}
 
-const DECIMALS: u8 = 6;
+const DECIMALS: u8 = 7;
 const SYMBOL: vector<u8> = b"TEST";
 const NAME: vector<u8> = b"TEST Coin";
 const DESCRIPTION: vector<u8> = b"TEST Coin Description";

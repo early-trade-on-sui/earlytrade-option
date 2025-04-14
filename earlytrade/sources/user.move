@@ -470,6 +470,7 @@ public fun buyer_exercise_option<UnderlyingAssetType, TradingCoinType>(
     let required_underlying_asset_value = option.get_underlying_asset_amount() * u64::pow(10, earlytrade::get_underlying_asset_decimal<TradingCoinType>(market));
     assert!(underlying_asset.value() >= required_underlying_asset_value, EInsufficientUnderlyingAsset);
 
+    std::debug::print(&underlying_asset.value());
     // transfer the the underlying assets to the seller
     transfer::public_transfer(underlying_asset, *option::borrow(&option.get_writer()));
 
@@ -477,6 +478,7 @@ public fun buyer_exercise_option<UnderlyingAssetType, TradingCoinType>(
     let mut premium_collateral_balance = option.withdraw_premium();
     premium_collateral_balance.join(option.withdraw_collateral());
 
+    std::debug::print(&premium_collateral_balance.value());
     // transfer the premium and collateral balance to the seller
     transfer::public_transfer(premium_collateral_balance.into_coin(ctx), *option::borrow(&option.get_writer()));
 
@@ -520,6 +522,7 @@ public fun seller_take_back_premium_and_collateral<TradingCoinType>(
     let mut premium_collateral_balance = option.withdraw_premium();
     premium_collateral_balance.join(option.withdraw_collateral());
 
+    std::debug::print(&premium_collateral_balance.value());
     // transfer the premium and collateral balance to the seller
     transfer::public_transfer(premium_collateral_balance.into_coin(ctx), *option::borrow(&option.get_writer()));
 

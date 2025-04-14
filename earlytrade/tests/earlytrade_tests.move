@@ -26,7 +26,7 @@ const PERCENTAGE_DIVISOR: u64 = 10_000;
 public fun setup(): (Scenario, Clock) {
     // step 1 publish the package by admin wallet
     let mut scenario = test_scenario::begin(ADMIN);
-    let mut clock = clock::create_for_testing(scenario.ctx());
+    let clock = clock::create_for_testing(scenario.ctx());
     earlytrade::init_for_testing(scenario.ctx());
 
     // step 2 initialize an orderbook
@@ -70,9 +70,7 @@ public fun setup(): (Scenario, Clock) {
 
 #[test]
 public fun test_buyer_place_order(): (Scenario, Clock) {
-    let (mut scenario, mut clock) = setup();
-
-    clock::increment_for_testing(&mut clock, ONE_DAY_IN_MS);
+    let (mut scenario, clock) = setup();
 
 
 
@@ -129,9 +127,8 @@ public fun test_buyer_place_order(): (Scenario, Clock) {
 // test writer place order
 #[test]
 public fun test_writer_place_order(): (Scenario, Clock) {
-    let (mut scenario, mut clock) = setup();
+    let (mut scenario, clock) = setup();
 
-    clock::increment_for_testing(&mut clock, ONE_DAY_IN_MS);
 
     scenario.next_tx(WRITER);{
         let mut user_orders = scenario.take_from_sender<UserOrders>();
@@ -171,9 +168,8 @@ public fun test_writer_place_order(): (Scenario, Clock) {
 // test cancel option
 #[test]
 public fun test_buyer_cancel_option(): (Scenario, Clock) {
-    let (mut scenario, mut clock) = test_buyer_place_order();
+    let (mut scenario, clock) = test_buyer_place_order();
 
-    clock::increment_for_testing(&mut clock, ONE_DAY_IN_MS);
 
     scenario.next_tx(BUYER);{
         let mut user_orders = scenario.take_from_sender<UserOrders>();
@@ -203,9 +199,8 @@ public fun test_buyer_cancel_option(): (Scenario, Clock) {
 
 #[test]
 public fun test_writer_cancel_option(): (Scenario, Clock) {
-    let (mut scenario, mut clock) = test_writer_place_order();
+    let (mut scenario, clock) = test_writer_place_order();
 
-    clock::increment_for_testing(&mut clock, ONE_DAY_IN_MS);
     
     scenario.next_tx(WRITER);{
         let mut user_orders = scenario.take_from_sender<UserOrders>();
@@ -236,9 +231,7 @@ public fun test_writer_cancel_option(): (Scenario, Clock) {
 // test buyer fill order 
 #[test]
 public fun test_buyer_fill_order(): (Scenario, Clock) {
-    let (mut scenario, mut clock) = test_writer_place_order();
-
-    clock::increment_for_testing(&mut clock, ONE_DAY_IN_MS);
+    let (mut scenario, clock) = test_writer_place_order();
 
     scenario.next_tx(BUYER);{
         let mut user_orders = scenario.take_from_sender<UserOrders>();
@@ -281,9 +274,8 @@ public fun test_buyer_fill_order(): (Scenario, Clock) {
 #[test]
 // test writer fill order
 public fun test_writer_fill_order(): (Scenario, Clock) {
-    let (mut scenario, mut clock) = test_buyer_place_order();
+    let (mut scenario, clock) = test_buyer_place_order();
 
-    clock::increment_for_testing(&mut clock, ONE_DAY_IN_MS);
     
     scenario.next_tx(WRITER);{
         let mut user_orders = scenario.take_from_sender<UserOrders>();
@@ -323,17 +315,113 @@ public fun test_writer_fill_order(): (Scenario, Clock) {
 }
 
 // test add exercise date and expiration date
+#[test]
+public fun test_add_exercise_date_and_expiration_date(): (Scenario, Clock) {
+    let (mut scenario, clock) = test_buyer_fill_order();
 
+    scenario.next_tx(ADMIN);{
+        let admin_cap = scenario.take_from_sender<AdminCap>();
+        let mut market = scenario.take_shared<Market<USDC>>();
+        earlytrade::set_exericse_expiration_date(
+            &mut market,
+            &admin_cap,
+            &clock, 7*ONE_DAY_IN_MS, 8*ONE_DAY_IN_MS);
+
+        test_scenario::return_shared(market);
+        test_scenario::return_to_sender(&scenario, admin_cap);
+    };
+
+    (scenario, clock)
+}
 
 // test add settlemnt coin and decimal
+#[test]
+public fun test_add_settlement_coin_and_decimal(): (Scenario, Clock) {
+    let (mut scenario, clock) = test_add_exercise_date_and_expiration_date();
 
+    // create a test coin for test
+    scenario.next_tx(ADMIN);{
+        test_coin::test_init(scenario.ctx());
 
+    };
+
+    scenario.next_tx(ADMIN);{
+        let admin_cap = scenario.take_from_sender<AdminCap>();
+        let mut market = scenario.take_shared<Market<USDC>>();
+        earlytrade::set_underlying_asset_type_and_decimal<TEST_COIN, USDC>(
+            &mut market,
+            &admin_cap,
+            7
+        );
+
+        test_scenario::return_shared(market);
+        test_scenario::return_to_sender(&scenario, admin_cap);
+    };
+
+    (scenario, clock)
+}
 // test buyer exercise option
+#[test]
+public fun test_buyer_exercise_option() {
+    let (mut scenario, mut clock) = test_add_settlement_coin_and_decimal();
+
+    clock::increment_for_testing(&mut clock, 7*ONE_DAY_IN_MS+1000);
+
+    scenario.next_tx(BUYER);{
+        let market = scenario.take_shared<Market<USDC>>();
+        let mut option = scenario.take_shared<CoveredPutOption<USDC>>();
+        let mut orderbook = scenario.take_shared<OrderBook>();
+
+
+        let amount = option.get_underlying_asset_amount();
+
+        let underlying_asset = coin::mint_for_testing<TEST_COIN>( amount* 10_000_000, scenario.ctx());
+
+        user::buyer_exercise_option<TEST_COIN, USDC>(
+            &mut option,
+            &mut orderbook, 
+            underlying_asset, 
+            & market, 
+            & clock, 
+            scenario.ctx()
+        );
+
+
+        test_scenario::return_shared(option);
+        test_scenario::return_shared(market);
+        test_scenario::return_shared(orderbook);
+    };
+
+
+    clock::destroy_for_testing(clock);
+    scenario.end();
+}
 
 
 
 // test writer reclaim collateral after expiration
+#[test]
+public fun test_writer_reclaim_collateral_after_expiration() {
+    let (mut scenario, mut clock) = test_add_settlement_coin_and_decimal();
 
+    clock::increment_for_testing(&mut clock, 8*ONE_DAY_IN_MS+1000);
+    
+    scenario.next_tx(WRITER);{
+        let mut option = scenario.take_shared<CoveredPutOption<USDC>>();
+        let mut orderbook = scenario.take_shared<OrderBook>();
+        let market = scenario.take_shared<Market<USDC>>();
+
+        user::seller_take_back_premium_and_collateral<USDC>(
+            &mut option, &mut orderbook, & market, &clock, scenario.ctx());
+
+        test_scenario::return_shared(option);
+        test_scenario::return_shared(market);
+        test_scenario::return_shared(orderbook);
+    };
+
+    clock::destroy_for_testing(clock);
+    scenario.end();
+}
 
 
 

@@ -118,7 +118,7 @@ public(package) fun new_option<TradingCoinType>(
 ): CoveredPutOption<TradingCoinType> {
     let current_time = tx_context::epoch(ctx);
 
-    //assert strike_price * underlying_asset_amount = premium_balance.value + collateral_balance.value
+    //assert strike_price * underlying_asset_amount = premium_value + collateral_value
     assert!((strike_price * underlying_asset_amount) == (premium_value + collateral_value), EInvalidOption);
 
 
