@@ -91,6 +91,12 @@ public struct OptionExpiredEvent has copy, drop {
     market_id: ID,
 }
 
+public struct UserOrdersInitializedEvent has copy, drop {
+    user_orders_id: ID,
+    owner: address,
+    orderbook_id: ID,
+}
+
 // ====== Public Functions ======
 
 /// Initialize user orders for a new user
@@ -102,6 +108,15 @@ public fun init_user_orders(orderbook: &OrderBook, ctx: &mut TxContext){
         maker_order_id_tracker: table::new<ID, OptionInfo>(ctx),
         taker_order_id_tracker: table::new<ID, OptionInfo>(ctx),
     };
+
+
+    // Emit event for user orders initialization
+    event::emit(UserOrdersInitializedEvent {
+        user_orders_id: object::id(&user_orders),
+        owner: ctx.sender(),
+        orderbook_id: orderbook.get_orderbook_id(),
+    });
+
     transfer::transfer(user_orders, ctx.sender());
 }
 
