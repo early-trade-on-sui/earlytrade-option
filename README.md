@@ -17,16 +17,19 @@ This project allows users who will receive tokens after TGE to buy covered-put o
 
 ## To-Do List
 
-1. Add minimum trading assets feature:
-   - Implement minimum trading assets value validation
-   - When users place an order, the value of assets should exceed min_trading_assets_value
-   - Add configuration for administrators to set minimum values
+1. ✅ Add minimum trading assets feature:
+   - ✅ Implement minimum trading assets value validation
+   - ✅ When users place an order, the value of assets should exceed min_trading_assets_value
+   - ✅ Add configuration for administrators to set minimum values
 
-2. Add potato pattern to improve composability:
-   - Refactor option creation and filling to use the potato pattern
-   - Separate creation logic from transaction effects
-   - Allow for better composability with other modules
-   - Implement builder pattern for option creation
+2. Integrate Scallop to improve capital efficiency:
+   - Implement Scallop integration for collateral assets
+   - Allow writers to deposit collateral into Scallop lending pools
+   - Enable earning interest on locked collateral while options are active
+   - Add withdrawal mechanisms for interest earned
+   - Implement safety measures to ensure collateral availability for exercise
+   - Support automatic rebalancing of collateral based on market conditions
+
 
 3. Add secondary market functionality:
    - Implement option listing and delisting on secondary market
@@ -36,13 +39,13 @@ This project allows users who will receive tokens after TGE to buy covered-put o
    - Add events for tracking secondary market activities
    - Support cancellation of listings
 
-4. Integrate Scallop to improve capital efficiency:
-   - Implement Scallop integration for collateral assets
-   - Allow writers to deposit collateral into Scallop lending pools
-   - Enable earning interest on locked collateral while options are active
-   - Add withdrawal mechanisms for interest earned
-   - Implement safety measures to ensure collateral availability for exercise
-   - Support automatic rebalancing of collateral based on market conditions
+
+4. Add potato pattern to improve composability - trading fee reduction, referal fees:
+   - Refactor option creation and filling to use the potato pattern
+   - Separate creation logic from transaction effects
+   - Allow for better composability with other modules
+   - Implement builder pattern for option creation
+
 
 ## Rules
 

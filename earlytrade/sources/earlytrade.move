@@ -36,18 +36,12 @@ Administrator:
 - can set the exercise date
 - can withdraw trading fees(premium)
 - can set the underlying assets after TGE
-
-
 */
-
-
 module earlytrade::earlytrade;
-
 use sui::balance::{Self, Balance};
 use sui::coin::Coin;
 use sui::table::{Self, Table};
 use sui::event;
-
 use std::string::{Self, String};
 use sui::clock::Clock;
 use std::type_name;
@@ -77,7 +71,7 @@ public struct Market<phantom TradingCoinType> has key {
     trading_fee_percentage: u64,            // Fee percentage (100 = 1%)
     minimum_trading_value: u64,             // Minimum trading value
     
-    // Administrator info
+    // Fee balance
     fee_balance: Balance<TradingCoinType>,   // Accumulated fees for admin withdrawal
     
     // Market timeline
@@ -85,8 +79,7 @@ public struct Market<phantom TradingCoinType> has key {
     exericse_date: Option<u64>,                  // Token Generation Event date (if set)
     expiration_date: Option<u64>,         // Last date to exercise after TGE
     
-
-    // After TGE
+    // underlying asset config
     underlying_asset_type: Option<String>,  // Address of underlying asset after TGE
     decimal: u8,
     
@@ -113,7 +106,6 @@ public struct OrderBook has key {
     exercised_options: Table<ID, OptionInfo>,             // Exercised options
     expired_options: Table<ID, OptionInfo>,               // Expired options
     
-    // Statistics
     created_at: u64,                        // When orderbook was created
 }
 
@@ -383,7 +375,6 @@ public fun is_market_active<TradingCoinType>(clock: &Clock, market: &Market<Trad
     // if it is not set, return true
     true
 }
-
 
 // assert whether the underlying assets is aligned with the market
 public fun assert_underlying_asset_aligned<TradingCoinType>(

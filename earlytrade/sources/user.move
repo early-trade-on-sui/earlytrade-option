@@ -532,7 +532,7 @@ public fun seller_take_back_premium_and_collateral<TradingCoinType>(
     assert!(option.get_status() == covered_put_option::status_matched(), EOptionNotExpired);
     assert!(option.get_buyer().is_some(), EOptionNotMatched);
     assert!(*option::borrow(&option.get_writer()) == ctx.sender(), ENotAuthorized);
-    
+
     // update the orderbook move option id from the active to the expired
     earlytrade::pop_covered_put_option_id_from_active(orderbook, option);
     earlytrade::push_covered_put_option_id_into_expired(orderbook, option);
