@@ -16,8 +16,7 @@ const STATUS_EXPIRED: u8 = 4;              // Expired without exercise
 // ====== Error Codes ======
 const EInvalidOption: u64 = 0;
 
-// ====== Core Data Structures ======
-
+// ====== Core Data Structures =====
 /// Represents a Covered Put Option that can be traded on the marketplace
 public struct CoveredPutOption<phantom TradingCoinType> has key {
     // Object properties
@@ -33,7 +32,6 @@ public struct CoveredPutOption<phantom TradingCoinType> has key {
     underlying_asset_amount: u64,           // Amount of the underlying asset (ignore decimals)
     premium_value: u64,
     collateral_value: u64,
-
 
     // fee records
     fee_paid_by_buyer: u64,

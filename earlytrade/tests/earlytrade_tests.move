@@ -18,6 +18,7 @@ const WRITER: address = @0x3;
 const ONE_DAY_IN_MS: u64 = 24 * 60 * 60 * 1000;
 const USDC_DECIMALS: u64 = 1_000_000;
 const PERCENTAGE_DIVISOR: u64 = 10_000;
+const MINIMUM_TRADING_VALUE: u64 = 5 * USDC_DECIMALS;
 
 
 
@@ -44,7 +45,7 @@ public fun setup(): (Scenario, Clock) {
         let mut orderbook = scenario.take_shared<OrderBook>();
         let trading_fee_percentage = 100;
 
-        earlytrade::create_market<USDC>(&admin_cap, market_name ,  &mut orderbook, &clock, trading_fee_percentage, scenario.ctx());
+        earlytrade::create_market<USDC>(&admin_cap, market_name ,  &mut orderbook, &clock, trading_fee_percentage, MINIMUM_TRADING_VALUE, scenario.ctx());
     
         test_scenario::return_shared(orderbook);
         test_scenario::return_to_sender(&scenario, admin_cap);
@@ -87,9 +88,9 @@ public fun test_buyer_place_order(): (Scenario, Clock) {
         // if we set strike price is 0.01 usdc/test coin, then the strike price is 10_000
         // premium_value is 0.005 usdc, then the premium_value is 5000
         // then the collateral_value is 10000 - 5000 = 5000
-        let premium_value:u64 = 5_000;
-        let collateral_value:u64    = 5_000;
-        let amount:u64 = 1;
+        let premium_value:u64 = 5_000_000_000;
+        let collateral_value:u64    = 5_000_000_000;
+        let amount:u64 = 1_000_000;
         let strike_price:u64 = 10_000;
 
         let fee_paid_by_buyer = strike_price * amount * market.get_fee_rate()/PERCENTAGE_DIVISOR;
@@ -136,9 +137,9 @@ public fun test_writer_place_order(): (Scenario, Clock) {
         let mut market = scenario.take_shared<Market<USDC>>();
         
         // get the option
-        let premium_value:u64 = 5_000;
-        let collateral_value:u64    = 5_000;
-        let amount:u64 = 1;
+        let premium_value:u64 = 5_000_000_000;
+        let collateral_value:u64    = 5_000_000_000;
+        let amount:u64 = 1_000_000;
         let strike_price:u64 = 10_000;
 
         let fee_paid_by_buyer = strike_price * amount * market.get_fee_rate()/PERCENTAGE_DIVISOR;
@@ -325,7 +326,7 @@ public fun test_add_exercise_date_and_expiration_date(): (Scenario, Clock) {
         earlytrade::set_exericse_expiration_date(
             &mut market,
             &admin_cap,
-            &clock, 7*ONE_DAY_IN_MS, 8*ONE_DAY_IN_MS);
+            &clock, 7*ONE_DAY_IN_MS, 8*ONE_DAY_IN_MS, scenario.ctx());
 
         test_scenario::return_shared(market);
         test_scenario::return_to_sender(&scenario, admin_cap);
@@ -351,7 +352,8 @@ public fun test_add_settlement_coin_and_decimal(): (Scenario, Clock) {
         earlytrade::set_underlying_asset_type_and_decimal<TEST_COIN, USDC>(
             &mut market,
             &admin_cap,
-            7
+            7,
+            scenario.ctx()
         );
 
         test_scenario::return_shared(market);

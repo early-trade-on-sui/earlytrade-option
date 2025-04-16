@@ -30,6 +30,7 @@ const EOptionNotExercisable: u64 = 13;
 const EOptionNotExpired: u64 = 14;
 const EInsufficientUnderlyingAsset: u64 = 15;
 const EInvalidOption: u64 = 16;
+const EInsufficientTradingValue: u64 = 17;
 
 // ====== Core Data Structures ======
 
@@ -150,6 +151,7 @@ public fun create_option_as_buyer<TradingCoinType>(
 
     // assert the premium_balance.value is same as premium_value
     assert!(premium_balance.value() == premium_value, EInvalidOption);
+    // check if the trading value is enough to trade
 
     let fee_paid_by_writer = 0;
     let status = covered_put_option::status_waiting_writer();
@@ -217,6 +219,7 @@ public fun create_option_as_writer<TradingCoinType>(
     // check if the strike price is valid
     assert!(strike_price > 0, EInvalidStrikePrice);
 
+
     // check if the amount is valid
     assert!(amount > 0, EInvalidAmount);
 
@@ -235,6 +238,10 @@ public fun create_option_as_writer<TradingCoinType>(
 
     // assert the collateral_balance.value is same as collateral_value
     assert!(collateral_balance.value() == collateral_value, EInvalidOption);
+    // check if the trading value is enough to trade
+    assert!(earlytrade::is_trading_value_enough(market, collateral_balance.value()), EInsufficientTradingValue);
+
+
 
     let premium_balance = balance::zero<TradingCoinType>();
     let market_id = market.get_market_id();
@@ -467,7 +474,7 @@ public fun buyer_exercise_option<UnderlyingAssetType, TradingCoinType>(
 
     // check option status and is matched
     assert!(option.get_status() == covered_put_option::status_matched(), EOptionNotActive);
-    assert!(option.get_buyer().is_some(), EOptionNotMatched);
+    assert!(*option::borrow(&option.get_buyer()) == ctx.sender(), ENotAuthorized);
     assert!(option.get_writer().is_some(), EOptionNotMatched);
 
     // update the orderbook move option id from the active to the exercised
@@ -524,8 +531,8 @@ public fun seller_take_back_premium_and_collateral<TradingCoinType>(
     // check option status and is matched
     assert!(option.get_status() == covered_put_option::status_matched(), EOptionNotExpired);
     assert!(option.get_buyer().is_some(), EOptionNotMatched);
-    assert!(option.get_writer().is_some(), EOptionNotMatched);
-
+    assert!(*option::borrow(&option.get_writer()) == ctx.sender(), ENotAuthorized);
+    
     // update the orderbook move option id from the active to the expired
     earlytrade::pop_covered_put_option_id_from_active(orderbook, option);
     earlytrade::push_covered_put_option_id_into_expired(orderbook, option);
@@ -556,4 +563,3 @@ public fun seller_take_back_premium_and_collateral<TradingCoinType>(
         market_id: market.get_market_id(),
     });
 }
-

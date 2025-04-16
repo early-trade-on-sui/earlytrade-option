@@ -75,6 +75,7 @@ public struct Market<phantom TradingCoinType> has key {
     // Market configuration
     market_name: String,                    // Name of the market: WAV-USDC, WAV-SUI, etc.
     trading_fee_percentage: u64,            // Fee percentage (100 = 1%)
+    minimum_trading_value: u64,             // Minimum trading value
     
     // Administrator info
     fee_balance: Balance<TradingCoinType>,   // Accumulated fees for admin withdrawal
@@ -93,12 +94,10 @@ public struct Market<phantom TradingCoinType> has key {
     total_premium_volume: u64,              // Total premium volume traded
     total_collateral_volume: u64,           // Total collateral volume locked
     active_options_count: u64,              // Number of active options
-
 }
 
 
 /// serve as a indexer for all options
-/// 
 public struct OrderBook has key {
     // Object properties
     id: UID,                                // Unique object identifier
@@ -120,19 +119,52 @@ public struct OrderBook has key {
 
 
 // ====== Events ======
-
 /// Event emitted when a market is created
 public struct MarketCreatedEvent has copy, drop {
     market_id: ID,
     market_name: String,
     trading_coin_type: String,
+    trading_fee_percentage: u64,
+    minimum_trading_value: u64,
+    creator: address,
     creation_date: u64,
 }
 
 public struct OrderBookCreatedEvent has copy, drop {
     orderbook_id: ID,
     orderbook_name: String,
+    creator: address,
     creation_date: u64,
+}
+
+/// Event emitted when fees are withdrawn from a market
+public struct FeesWithdrawnEvent has copy, drop {
+    market_id: ID,
+    market_name: String,
+    trading_coin_type: String,
+    amount: u64,
+    recipient: address,
+    timestamp: u64,
+}
+
+/// Event emitted when market parameters are updated
+public struct MarketParametersUpdatedEvent has copy, drop {
+    market_id: ID,
+    market_name: String,
+    exercise_date: u64,
+    expiration_date: u64,
+    updater: address,
+    timestamp: u64,
+}
+
+/// Event emitted when underlying asset is set
+public struct UnderlyingAssetUpdatedEvent has copy, drop {
+    market_id: ID,
+    market_name: String,
+    underlying_asset_type: String,
+    decimal: u8,
+    updater: address,
+    timestamp: u64,
 }
 
 // ====== Initialization Functions ======
@@ -142,7 +174,7 @@ fun init(ctx: &mut TxContext) {
     let admin_cap = AdminCap {
         id: object::new(ctx)
     };
-    transfer::public_transfer(admin_cap, tx_context::sender(ctx));
+    transfer::public_transfer(admin_cap,ctx.sender());
 }
 
 public fun init_orderbook(
@@ -171,6 +203,7 @@ public fun init_orderbook(
     event::emit(OrderBookCreatedEvent {
         orderbook_id: object::id(&orderbook),
         orderbook_name: orderbook_name,
+        creator:ctx.sender(),
         creation_date: current_time,
     });
 
@@ -185,6 +218,7 @@ public fun create_market<TradingCoinType>(
     orderbook: &mut OrderBook,
     clock: &Clock,
     trading_fee_percentage: u64,
+    minimum_trading_value: u64,
     ctx: &mut TxContext
 ) {
 
@@ -197,6 +231,7 @@ public fun create_market<TradingCoinType>(
         market_name: name,
 
         trading_fee_percentage: trading_fee_percentage,
+        minimum_trading_value: minimum_trading_value,
         fee_balance: balance::zero(),
 
         creation_date: current_time,
@@ -220,6 +255,9 @@ public fun create_market<TradingCoinType>(
         market_id: object::id(&market),
         market_name: name,
         trading_coin_type: string::from_ascii(*type_name::borrow_string(&type_name::get<TradingCoinType>())),
+        trading_fee_percentage: trading_fee_percentage,
+        minimum_trading_value: minimum_trading_value,
+        creator: ctx.sender(),
         creation_date: current_time,
     });
     
@@ -237,6 +275,7 @@ public fun set_exericse_expiration_date<TradingCoinType>(
     clock: &Clock,
     exericse_date: u64,
     expiration_date: u64,
+    ctx: &mut TxContext
 ) {
     // Validate dates
     let current_time = clock.timestamp_ms();
@@ -246,6 +285,16 @@ public fun set_exericse_expiration_date<TradingCoinType>(
     // Set TGE date and exercise period
     market.exericse_date = option::some(exericse_date);
     market.expiration_date = option::some(expiration_date);
+    
+    // Emit event for market parameters update
+    event::emit(MarketParametersUpdatedEvent {
+        market_id: object::id(market),
+        market_name: market.market_name,
+        exercise_date: exericse_date,
+        expiration_date: expiration_date,
+        updater: ctx.sender(),
+        timestamp: current_time,
+    });
 }
 
 /// Withdraw accumulated fees (admin only)
@@ -257,7 +306,20 @@ public fun withdraw_fees<TradingCoinType>(
 
     // Extract all accumulated fees
     let fee_balance = balance::withdraw_all(&mut market.fee_balance);
-    fee_balance.into_coin(ctx)
+    let amount = fee_balance.value();
+    let coin = fee_balance.into_coin(ctx);
+    
+    // Emit event for fee withdrawal
+    event::emit(FeesWithdrawnEvent {
+        market_id: object::id(market),
+        market_name: market.market_name,
+        trading_coin_type: string::from_ascii(*type_name::borrow_string(&type_name::get<TradingCoinType>())),
+        amount,
+        recipient:ctx.sender(),
+        timestamp: tx_context::epoch(ctx),
+    });
+    
+    coin
 }
 
 /// set the underlying asset type and decimal(admin only)
@@ -265,10 +327,21 @@ public fun set_underlying_asset_type_and_decimal<UnderlyingAssetType, TradingCoi
     market: &mut Market<TradingCoinType>,
     _: &AdminCap,
     decimal: u8,
+    ctx: &mut TxContext
 ) {
-    market.underlying_asset_type = option::some(string::from_ascii(*type_name::borrow_string(&type_name::get<UnderlyingAssetType>())));
+    let asset_type = string::from_ascii(*type_name::borrow_string(&type_name::get<UnderlyingAssetType>()));
+    market.underlying_asset_type = option::some(asset_type);
     market.decimal = decimal;
-
+    
+    // Emit event for underlying asset update
+    event::emit(UnderlyingAssetUpdatedEvent {
+        market_id: object::id(market),
+        market_name: market.market_name,
+        underlying_asset_type: asset_type,
+        decimal,
+        updater:ctx.sender(),
+        timestamp: tx_context::epoch(ctx),
+    });
 }
 
 // ====== Helper Functions ======
@@ -321,6 +394,14 @@ public fun assert_underlying_asset_aligned<TradingCoinType>(
     assert!(option::is_some(&market.underlying_asset_type), EUnderlyingAssetNotSet);
     // check whether the underlying asset is aligned with the market
     assert!(market.underlying_asset_type == option::some(underlying_asset_type), EUnderlyingAssetNotAligned);
+}
+
+// check if the trading value is enough to trade
+public fun is_trading_value_enough<TradingCoinType>(
+    market: &Market<TradingCoinType>,
+    trading_value: u64,
+): bool {
+    trading_value >= market.minimum_trading_value
 }
 
 
