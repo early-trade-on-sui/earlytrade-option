@@ -83,10 +83,6 @@ public struct Market<phantom TradingCoinType> has key {
     underlying_asset_type: Option<String>,  // Address of underlying asset after TGE
     decimal: u8,
     
-    // Trading metrics
-    total_premium_volume: u64,              // Total premium volume traded
-    total_collateral_volume: u64,           // Total collateral volume locked
-    active_options_count: u64,              // Number of active options
 }
 
 
@@ -115,6 +111,7 @@ public struct OrderBook has key {
 public struct MarketCreatedEvent has copy, drop {
     market_id: ID,
     market_name: String,
+    orderbook_id: ID,
     trading_coin_type: String,
     trading_fee_percentage: u64,
     minimum_trading_value: u64,
@@ -231,11 +228,7 @@ public fun create_market<TradingCoinType>(
         expiration_date: option::none(),
         
         underlying_asset_type: option::none(),
-        decimal: 0u8,
-
-        total_premium_volume: 0u64,
-        total_collateral_volume: 0u64,
-        active_options_count: 0u64,
+        decimal: 0u8
 
     };
     
@@ -246,6 +239,7 @@ public fun create_market<TradingCoinType>(
     event::emit(MarketCreatedEvent {
         market_id: object::id(&market),
         market_name: name,
+        orderbook_id: object::id(orderbook),
         trading_coin_type: string::from_ascii(*type_name::borrow_string(&type_name::get<TradingCoinType>())),
         trading_fee_percentage: trading_fee_percentage,
         minimum_trading_value: minimum_trading_value,
